@@ -1,18 +1,21 @@
 <!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>英語歌曲・專用錄音室</title><style>
 :root{font-family:Arial,'Microsoft JhengHei',sans-serif;color:#173f34;background:#f5f6ed}*{box-sizing:border-box}main{max-width:720px;margin:5vh auto;padding:28px}h1{font-size:32px}.eyebrow{letter-spacing:3px;font-size:12px}.card{background:white;border-radius:24px;padding:26px;box-shadow:0 10px 50px #173f3410}#line{font-size:28px;line-height:1.6}button,a{display:inline-block;padding:14px 18px;border-radius:12px;border:1px solid #bbcec1;color:#173f34;background:white;font:inherit;margin:6px 4px 6px 0;min-height:48px}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}.primary{background:#146754;color:white}audio{width:100%;margin:15px 0}p{line-height:1.8}#status{background:#e8f2ed;padding:15px;border-radius:12px}#clock{font-size:40px;font-variant-numeric:tabular-nums}a{color:#146754}[hidden]{display:none!important}button:focus-visible,a:focus-visible{outline:3px solid #bf8110;outline-offset:3px}@media(max-width:500px){main{padding:18px;margin:0}.card{padding:20px}}
-</style></head><body><main><p class="eyebrow">ENGLISH SONG · RECORDING STUDIO</p><h1>讓你的聲音，被聽見。</h1><p>使用手機麥克風或耳麥錄音。錄完先試聽，再帶回練習頁上傳。</p><section class="card"><p id="number">單句錄音</p><p id="line" lang="en">請從歌曲練習頁按「開始錄音」。</p><p id="clock" aria-label="錄音秒數">00:00</p><div><button id="record" class="primary">開始錄音</button><button id="stop" disabled>結束錄音</button></div><p id="status" role="status">準備好後按開始，並允許使用麥克風。</p><audio id="audio" controls hidden></audio><a id="download" hidden>下載備份</a><button id="return" disabled>帶回練習頁</button><p>每次最長 60 秒。此頁不會上傳錄音至 GitHub；回到原練習頁後，才由您按「上傳至雲端硬碟」。請保留原本的練習分頁。</p></section></main><script>
+</style></head><body><main><p class="eyebrow">ENGLISH SONG · RECORDING STUDIO</p><h1>讓你的聲音，被聽見。</h1><p>使用手機麥克風或耳麥錄音。錄完先試聽，再帶回練習頁上傳。</p><section class="card"><p id="number">單句錄音</p><p id="line" lang="en">請從歌曲練習頁按「開始錄音」。</p><p id="clock" aria-label="錄音秒數">00:00</p><div><button id="record" class="primary">開始錄音</button><button id="stop" disabled>結束錄音</button></div><p id="status" role="status">準備好後按開始，並允許使用麥克風。</p><audio id="audio" controls hidden></audio><a id="download" hidden>下載備份</a><button id="return" disabled>下載並返回練習頁</button><p>每次最長 60 秒。此頁不會上傳錄音至 GitHub；回到原練習頁後，才由您按「上傳至雲端硬碟」。按返回會先儲存錄音，再傳回原頁並關閉此分頁。若裝置顯示下載或儲存提示，請完成確認。請保留原本的練習分頁。</p></section></main><script>
 'use strict';
 const $=id=>document.getElementById(id),params=new URLSearchParams(location.hash.slice(1)),nonce=params.get('nonce'),origin=params.get('origin');
 const validOrigin=origin && (/^https:\/\/[a-z0-9-]+(?:\.script|-script)\.googleusercontent\.com$/.test(origin)||origin==='https://script.google.com'||/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin));
-let stream=null,recorder=null,blob=null,url=null,timer=null,tick=null,generation=0,setup=false,returnTimer=null;
+let stream=null,recorder=null,blob=null,url=null,timer=null,tick=null,generation=0,setup=false,returnTimer=null,closeTimer=null,returning=false,savedBlob=null;
 function send(type,extra={}){if(validOrigin&&nonce&&window.opener)window.opener.postMessage({type,nonce,...extra},origin);}
 function stop(){if(recorder&&recorder.state!=='inactive')recorder.stop();if(stream)stream.getTracks().forEach(t=>t.stop());clearTimeout(timer);clearInterval(tick);}
-function clearPreview(){blob=null;$('audio').pause();$('audio').removeAttribute('src');$('audio').hidden=true;$('download').hidden=true;$('return').disabled=true;if(url){URL.revokeObjectURL(url);url=null;}}
+function clearPreview(){clearTimeout(returnTimer);clearTimeout(closeTimer);returning=false;savedBlob=null;blob=null;$('audio').pause();$('audio').removeAttribute('src');$('audio').hidden=true;$('download').hidden=true;$('return').disabled=true;if(url){URL.revokeObjectURL(url);url=null;}}
 window.addEventListener('message',event=>{
   const m=event.data;if(!validOrigin||event.origin!==origin||event.source!==window.opener||!m||m.nonce!==nonce)return;
   if(m.type==='song-recorder-setup'&&m.line&&typeof m.line.text==='string'){setup=true;clearInterval(handshake);$('line').textContent=m.line.text.slice(0,2000);$('number').textContent='第 '+String(m.line.number).padStart(2,'0')+' 句';}
   if(m.type==='song-recorder-cancel'){generation++;stop();setup=false;clearPreview();$('record').disabled=true;$('status').textContent='原練習頁已登出或開啟另一段錄音，請關閉此頁。';}
-  if(m.type==='song-recorder-received'){clearTimeout(returnTimer);$('status').textContent='已帶回練習頁！請切換回原分頁，勾選同意並上傳雲端硬碟。';$('return').disabled=false;}
+  if(m.type==='song-recorder-received'&&returning){
+    returning=false;clearTimeout(returnTimer);$('status').textContent='錄音已傳回練習頁，正在返回並關閉此分頁……';
+    closeTimer=setTimeout(()=>{try{window.opener.focus();}catch(_){}window.close();$('status').textContent='錄音已傳回。若瀏覽器未自動關閉，請手動關閉此分頁，回原頁上傳。';$('return').disabled=false;$('record').disabled=false;},1500);
+  }
 });
 const handshake=setInterval(()=>send('song-recorder-ready'),700);send('song-recorder-ready');setTimeout(()=>clearInterval(handshake),60000);
 $('record').onclick=async()=>{
@@ -28,7 +31,7 @@ $('record').onclick=async()=>{
       current.getTracks().forEach(t=>t.stop());clearTimeout(timer);clearInterval(tick);if(take!==generation)return;$('record').disabled=false;$('stop').disabled=true;
       if(failed)return;
       if(!size||size>6*1024*1024){$('status').textContent='錄音為空或過大，請重新錄製。';return;}
-      blob=new Blob(chunks,{type:currentRecorder.mimeType||mime||'audio/webm'});url=URL.createObjectURL(blob);$('audio').src=url;$('audio').hidden=false;$('download').href=url;$('download').download='english-practice.'+(/mp4/.test(blob.type)?'m4a':/ogg/.test(blob.type)?'ogg':'webm');$('download').hidden=false;$('return').disabled=!setup;$('status').textContent='錄音完成。請試聽後按「帶回練習頁」。若原頁已關閉，可下載備份後重新登入上傳。';
+      blob=new Blob(chunks,{type:currentRecorder.mimeType||mime||'audio/webm'});url=URL.createObjectURL(blob);$('audio').src=url;$('audio').hidden=false;$('download').href=url;$('download').download='english-practice.'+(/mp4/.test(blob.type)?'m4a':/ogg/.test(blob.type)?'ogg':'webm');$('download').hidden=false;$('return').disabled=!setup;$('status').textContent='錄音完成。請試聽後按「下載並返回練習頁」。若原頁已關閉，可下載備份後重新登入上傳。';
     };
     recorder.onerror=()=>{failed=true;stop();$('status').textContent='錄音失敗，請檢查耳麥連接後再試。';};
     recorder.start(250);$('stop').disabled=false;$('clock').textContent='00:00';$('status').textContent='錄音中。完成後按「結束錄音」。';
@@ -36,7 +39,31 @@ $('record').onclick=async()=>{
   }catch(e){if(take!==generation)return;stop();$('record').disabled=false;$('stop').disabled=true;$('status').textContent=e.name==='NotAllowedError'?'麥克風未獲允許。請在網址列的網站設定允許麥克風，再重試。':e.name==='NotFoundError'?'找不到麥克風，請接上耳麥或檢查裝置。':'無法啟動錄音，請用 Safari 或 Chrome 開啟本頁，並檢查麥克風。';}
 };
 $('stop').onclick=stop;
-$('return').onclick=()=>{if(!blob||!setup)return;$('return').disabled=true;$('audio').pause();send('song-recorder-audio',{blob});$('status').textContent='正在帶回原練習頁……';returnTimer=setTimeout(()=>{$('return').disabled=false;$('status').textContent='尚未收到原頁確認。請先切回原練習分頁，再回來重試；或下載備份，於原頁選擇檔案上傳。';},8000);};
+async function saveRecording(){
+  if(savedBlob===blob)return;
+  const filename=$('download').download;
+  if(typeof window.showSaveFilePicker==='function'){
+    const handle=await window.showSaveFilePicker({suggestedName:filename});
+    const writer=await handle.createWritable();
+    try{await writer.write(blob);await writer.close();}catch(error){try{await writer.abort();}catch(_){}throw error;}
+  }else{
+    // Browsers do not expose completion events for ordinary downloads.
+    // Trigger while handling the user's click; keep the Blob URL alive during handoff.
+    $('download').click();
+  }
+  savedBlob=blob;
+}
+$('return').onclick=async()=>{
+  if(!blob||!setup||$('return').disabled)return;
+  $('return').disabled=true;$('record').disabled=true;$('audio').pause();
+  try{
+    await saveRecording();
+    if(!blob||!setup)throw new Error('disconnected');
+    returning=true;$('status').textContent='已儲存或啟動下載，正在帶回原練習頁……';
+    returnTimer=setTimeout(()=>{returning=false;$('return').disabled=false;$('record').disabled=false;$('status').textContent='尚未收到原頁確認，因此保留此分頁。請確認下載已完成，切回原練習頁後再重試。';},8000);
+    send('song-recorder-audio',{blob});
+  }catch(error){returning=false;clearTimeout(returnTimer);$('return').disabled=!setup;$('record').disabled=!setup;$('status').textContent=error.name==='AbortError'?'已取消儲存，錄音仍保留在此頁。可再次按「下載並返回練習頁」。':'未能完成儲存或回傳，錄音仍保留。請下載備份後再試。';}
+};
 window.addEventListener('pagehide',()=>{generation++;stop();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});
 </script></body></html>
